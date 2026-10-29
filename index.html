@@ -169,7 +169,8 @@ async function startAudio(event) {
   } catch (error) {
     console.error("VOID audio start error:", error);
 
-    instruction.textContent = String(error.name) + ": " + String(error.message);
+    instruction.textContent =
+  String(error.name) + ": " + String(error.message);
 
     if (audioContext && audioContext.state === "suspended") {
       audioContext.resume().catch(console.error);
