@@ -1,1 +1,357 @@
 
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#050505">
+<title>VOID — Voice Becomes Form</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #050505;
+}
+body {
+  touch-action: none;
+  overscroll-behavior: none;
+}
+canvas {
+  display: block;
+}
+#start {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: #050505;
+  color: #ddd;
+  font: 11px Arial, sans-serif;
+  letter-spacing: 4px;
+  border: 0;
+  cursor: pointer;
+}
+#start strong {
+  font-size: 27px;
+  font-weight: 400;
+  letter-spacing: 8px;
+  margin-bottom: 22px;
+}
+#start span {
+  color: #777;
+  font-size: 10px;
+  letter-spacing: 3px;
+}
+#start.hidden {
+  display: none;
+}
+#sound-state {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 18px;
+  color: #666;
+  text-align: center;
+  font: 9px Arial, sans-serif;
+  letter-spacing: 3px;
+  pointer-events: none;
+}
+</style>
+</head>
+
+<body>
+
+<button id="start">
+  <strong>VOID</strong>
+  <span>TOUCH TO LISTEN</span>
+</button>
+<div id="sound-state">VOICE / PARTICLES / SPACE</div>
+
+<audio id="voice" src="voice.mp3" loop preload="auto"></audio>
+
+<script>
+const PARTICLE_COUNT = 650;
+
+let particles = [];
+let audioContext;
+let analyser;
+let source;
+let frequencyData;
+let waveformData;
+let audioReady = false;
+
+let voiceEnergy = 0;
+let bassEnergy = 0;
+let highEnergy = 0;
+
+let centerX, centerY;
+let targetX, targetY;
+let pointerActive = false;
+let elapsed = 0;
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  pixelDensity(1);
+  frameRate(30);
+  colorMode(RGB, 255);
+  centerX = targetX = width * 0.5;
+  centerY = targetY = height * 0.5;
+  createParticles();
+  noStroke();
+}
+
+function createParticles() {
+  particles = [];
+
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    const angle = random(TWO_PI);
+    const radius = random(8, min(width, height) * 0.48);
+
+    particles.push({
+      angle: angle,
+      radius: radius,
+      originalRadius: radius,
+      speed: random(-0.012, 0.012),
+      phase: random(TWO_PI),
+      size: random(0.5, 2.0),
+      depth: random(0.3, 1.0),
+      noiseOffset: random(1000)
+    });
+  }
+}
+
+async function startArtwork() {
+  const button = document.getElementById("start");
+  const audio = document.getElementById("voice");
+
+  button.querySelector("span").textContent = "LOADING VOICE...";
+
+  try {
+    if (!audioContext) {
+      audioContext = new (
+        window.AudioContext || window.webkitAudioContext
+      )();
+
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.78;
+
+      frequencyData = new Uint8Array(analyser.frequencyBinCount);
+      waveformData = new Uint8Array(analyser.fftSize);
+
+      source = audioContext.createMediaElementSource(audio);
+      source.connect(analyser);
+      analyser.connect(audioContext.destination);
+    }
+
+    await audioContext.resume();
+
+    audio.volume = 0.85;
+    await audio.play();
+
+    audioReady = true;
+    button.classList.add("hidden");
+
+  } catch (error) {
+    console.error(error);
+    button.querySelector("span").textContent =
+      "CHECK voice.mp3 AND TRY AGAIN";
+  }
+}
+
+document.getElementById("start").addEventListener(
+  "click",
+  startArtwork
+);
+
+function analyzeVoice() {
+  if (!audioReady || !analyser) {
+    voiceEnergy *= 0.97;
+    bassEnergy *= 0.97;
+    highEnergy *= 0.97;
+    return;
+  }
+
+  analyser.getByteFrequencyData(frequencyData);
+  analyser.getByteTimeDomainData(waveformData);
+
+  let total = 0;
+  let bass = 0;
+  let high = 0;
+
+  for (let i = 0; i < frequencyData.length; i++) {
+    const value = frequencyData[i] / 255;
+    total += value;
+
+    if (i < 12) bass += value;
+    if (i > 100) high += value;
+  }
+
+  const count = frequencyData.length;
+
+  voiceEnergy = lerp(
+    voiceEnergy,
+    total / count,
+    0.18
+  );
+
+  bassEnergy = lerp(
+    bassEnergy,
+    bass / 12,
+    0.18
+  );
+
+  highEnergy = lerp(
+    highEnergy,
+    high / max(1, count - 101),
+    0.18
+  );
+}
+
+function draw() {
+  background(5, 5, 5, 45);
+
+  analyzeVoice();
+
+  elapsed += 0.012 + voiceEnergy * 0.06;
+
+  centerX = lerp(centerX, targetX, 0.035);
+  centerY = lerp(centerY, targetY, 0.035);
+
+  const maxRadius = min(width, height) * 0.46;
+
+  // Voice energy controls the scale of the void.
+  const expansion =
+    0.65 + voiceEnergy * 3.0 + bassEnergy * 0.7;
+
+  for (let p of particles) {
+    const n = noise(
+      p.noiseOffset,
+      elapsed * 0.35
+    );
+
+    const orbitSpeed =
+      p.speed +
+      (0.001 + voiceEnergy * 0.018) *
+      (p.depth > 0.5 ? 1 : -1);
+
+    p.angle += orbitSpeed;
+
+    const wave =
+      sin(p.angle * 3 + elapsed + p.phase) *
+      (8 + highEnergy * 70);
+
+    const pulse =
+      sin(elapsed * 1.7 + p.phase) *
+      (4 + bassEnergy * 35);
+
+    const r = constrain(
+      p.radius * expansion +
+      wave +
+      pulse,
+      0,
+      maxRadius * 2.0
+    );
+
+    const twist =
+      sin(r * 0.012 - elapsed * 2.0) *
+      (0.15 + highEnergy * 0.9);
+
+    const angle = p.angle + twist;
+
+    let x = centerX + cos(angle) * r;
+    let y = centerY + sin(angle) * r * 1.25;
+
+    // Finger movement disturbs nearby particles.
+    if (pointerActive) {
+      const d = dist(x, y, targetX, targetY);
+      const influence = exp(
+        -d / (min(width, height) * 0.18)
+      );
+
+      const direction = atan2(
+        y - targetY,
+        x - targetX
+      );
+
+      x += cos(direction) *
+        influence * (10 + voiceEnergy * 100);
+
+      y += sin(direction) *
+        influence * (10 + voiceEnergy * 100);
+    }
+
+    const alpha = constrain(
+      70 + p.depth * 150 + voiceEnergy * 160,
+      0,
+      255
+    );
+
+    const particleSize =
+      p.size * (0.8 + voiceEnergy * 2.5);
+
+    fill(220, 225, 230, alpha);
+    circle(x, y, particleSize);
+
+    // Fine filaments appear with the voice.
+    if (voiceEnergy > 0.12 && p.depth > 0.88) {
+      stroke(150, 155, 165, voiceEnergy * 45);
+      strokeWeight(0.5);
+      line(
+        x, y,
+        x - cos(angle) * (3 + highEnergy * 20),
+        y - sin(angle) * (3 + highEnergy * 20)
+      );
+      noStroke();
+    }
+  }
+
+  // A subtle dark center preserves the sense of depth.
+  noStroke();
+  fill(5, 5, 5, 90);
+  circle(centerX, centerY, min(width, height) * 0.07);
+}
+
+function pointerMoved(x, y) {
+  targetX = x;
+  targetY = y;
+  pointerActive = true;
+}
+
+function mouseMoved() {
+  pointerMoved(mouseX, mouseY);
+}
+
+function mouseDragged() {
+  pointerMoved(mouseX, mouseY);
+}
+
+function touchStarted() {
+  pointerMoved(touchX, touchY);
+  return false;
+}
+
+function touchMoved() {
+  pointerMoved(touchX, touchY);
+  return false;
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  createParticles();
+  targetX = constrain(targetX, 0, width);
+  targetY = constrain(targetY, 0, height);
+}
+</script>
+
+</body>
+</html>
