@@ -1,28 +1,282 @@
 
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport"
+ content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>VOID — Deep Ambient 001</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+
+<style>
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  overscroll-behavior: none;
+  font-family: Arial, sans-serif;
+}
+
+canvas {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+#start {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: #000;
+  color: #fff;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#title {
+  font-size: clamp(24px, 5vw, 32px);
+  letter-spacing: .45em;
+  margin-left: .45em;
+}
+
+#subtitle {
+  margin-top: 14px;
+  font-size: 10px;
+  letter-spacing: .25em;
+  color: #888;
+}
+
+#instruction {
+  margin-top: 48px;
+  font-size: 10px;
+  letter-spacing: .2em;
+  color: #888;
+}
+
+#start.hidden {
+  display: none;
+}
+
+#caption {
+  position: fixed;
+  left: 18px;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 2;
+  color: #777;
+  font-size: 9px;
+  letter-spacing: .2em;
+  pointer-events: none;
+}
+</style>
+</head>
+
+<body>
+
+<div id="start" role="button" aria-label="Start VOID">
+  <div id="title">VOID</div>
+  <div id="subtitle">DEEP AMBIENT / 001</div>
+  <div id="instruction">TOUCH TO ENTER</div>
+</div>
+
+<div id="caption">A FIELD OF SILENCE</div>
+
+<audio id="ambient"
+ src="./VOID_Deep_Ambient_001.mp3"
+ loop preload="auto" playsinline></audio>
+
+<script>
+let analyser, freq;
+let audioContext;
+let started = false;
+let energy = 0, bass = 0, treble = 0;
+let curves = 7;
+let dots = 25;
+
 function setup() {
-  const canvas = createCanvas(windowWidth, windowHeight);
+  createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
   frameRate(30);
 
-  canvas.elt.style.position = "fixed";
-  canvas.elt.style.inset = "0";
-  canvas.elt.style.width = "100%";
-  canvas.elt.style.height = "100%";
-  canvas.elt.style.touchAction = "none";
+  const canvas = document.querySelector("canvas");
+  canvas.style.touchAction = "none";
 
-  touchX = width / 2;
-  touchY = height / 2;
+  // Pointer events on modern Safari, iPadOS and desktop.
+  const startScreen = document.getElementById("start");
+  startScreen.addEventListener("pointerup", startAudio);
+}
 
-  document.getElementById("start")
-    .addEventListener("pointerdown", startAudio);
+async function startAudio(event) {
+  if (started) return;
+
+  event.preventDefault();
+
+  const instruction = document.getElementById("instruction");
+  instruction.textContent = "LOADING...";
+
+  try {
+    const audio = document.getElementById("ambient");
+
+    // Create/resume audio in direct response to the user's tap.
+    const AudioContextClass =
+      window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioContextClass) {
+      throw new Error("Web Audio is not supported in this browser.");
+    }
+
+    audioContext = new AudioContextClass();
+
+    const resumePromise = audioContext.resume();
+
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.85;
+    freq = new Uint8Array(analyser.frequencyBinCount);
+
+    const source = audioContext.createMediaElementSource(audio);
+    const filter = audioContext.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 7000;
+
+    const volume = audioContext.createGain();
+    volume.gain.value = 0.85;
+
+    source.connect(filter);
+    filter.connect(analyser);
+    analyser.connect(volume);
+    volume.connect(audioContext.destination);
+
+    // Call play immediately during the tap gesture.
+    const playPromise = audio.play();
+
+    await Promise.all([resumePromise, playPromise]);
+
+    started = true;
+    document.getElementById("start").classList.add("hidden");
+
+  } catch (error) {
+    console.error("VOID audio start error:", error);
+
+    instruction.textContent = "TAP TO TRY AGAIN";
+
+    if (audioContext && audioContext.state === "suspended") {
+      audioContext.resume().catch(console.error);
+    }
+  }
+}
+
+function draw() {
+  background(0);
+
+  if (analyser && freq) {
+    analyser.getByteFrequencyData(freq);
+
+    let sum = 0, low = 0, high = 0;
+
+    for (let i = 0; i < freq.length; i++) {
+      sum += freq[i];
+      if (i < 14) low += freq[i];
+      if (i > 70) high += freq[i];
+    }
+
+    energy = lerp(energy, sum / freq.length / 255, 0.08);
+    bass = lerp(bass, low / 14 / 255, 0.07);
+    treble = lerp(
+      treble,
+      high / max(1, freq.length - 70) / 255,
+      0.07
+    );
+  }
+
+  const cx = width / 2;
+  const cy = height / 2;
+  const unit = min(width, height);
+  const base = unit * 0.235;
+
+  // Minimal axes
+  stroke(170, 170, 170, 75);
+  strokeWeight(0.65);
+  line(cx - unit * 0.44, cy, cx + unit * 0.44, cy);
+  line(cx, cy - unit * 0.40, cx, cy + unit * 0.40);
+
+  // Axis dots
+  noStroke();
+  for (let i = 0; i < dots; i++) {
+    const u = map(i, 0, dots - 1, -0.43, 0.43);
+    const pulse = 0.5 + 0.5 * sin(frameCount * 0.018 + i * 0.7);
+    const size = (i % 6 === 0 ? 3.2 : 1.4) + pulse * energy * 2;
+
+    fill(235, 235, 235, 100 + pulse * 120);
+    circle(cx + u * unit, cy, size);
+    circle(cx, cy + u * unit, size);
+  }
+
+  // Flat abstract contours
+  for (let k = 0; k < curves; k++) {
+    const phase = frameCount * 0.008 + k * 0.62;
+    const spread = 0.60 + k * 0.105;
+    const amplitude = base * (0.48 + k * 0.065);
+
+    noFill();
+    stroke(230, 230, 235, 105 - k * 10 + energy * 50);
+    strokeWeight(k === 0 ? 1.05 : 0.65);
+
+    beginShape();
+    for (let j = 0; j <= 180; j++) {
+      const a = TWO_PI * j / 180;
+
+      const wave1 = sin(a * 2 + phase) * amplitude * 0.30;
+      const wave2 = sin(a * 3 - phase * 0.7) * amplitude * 0.12;
+      const audioShape = bass * amplitude * 0.45 *
+                         sin(a * 2 + phase * 1.4);
+
+      const r = base * spread + wave1 + wave2 + audioShape;
+      const x = cx + cos(a) * r *
+                (1 + 0.18 * cos(a * 2 + phase));
+      const y = cy + sin(a) * r *
+                (1.12 + 0.12 * sin(a * 3 - phase));
+
+      vertex(x, y);
+    }
+    endShape(CLOSE);
+  }
+
+  // Fine particles
+  for (let i = 0; i < 110; i++) {
+    const a = i * 2.39996 + frameCount * 0.0015;
+    const ring = base * (0.72 + (i % 13) * 0.052);
+    const wobble = sin(frameCount * 0.012 + i) *
+                   (1 + treble * 12);
+
+    const x = cx + cos(a) * (ring + wobble);
+    const y = cy + sin(a) * (ring * 1.10 + wobble);
+
+    noStroke();
+    fill(235, 235, 240, 65 + energy * 150);
+    circle(x, y, i % 17 === 0 ? 2.4 : 1.0);
+  }
+
+  // Center point
+  noStroke();
+  fill(248);
+  circle(cx, cy, unit * (0.037 + bass * 0.012));
 }
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  touchX = width / 2;
-  touchY = height / 2;
 }
-
-function pointerPressed(e) {
-  disturb(e.clientX, e.clientY);
-}
+</script>
+</body>
+</html>
