@@ -9,56 +9,24 @@
 <style>
 * { box-sizing: border-box; }
 html, body {
-  margin: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: #030304;
+  margin: 0; width: 100%; height: 100%;
+  overflow: hidden; background: #000;
   font-family: Arial, sans-serif;
 }
-canvas {
-  position: fixed;
-  inset: 0;
-  display: block;
-}
+canvas { display: block; }
 #start {
-  position: fixed;
-  inset: 0;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  background: rgba(0,0,0,.35);
-  color: white;
-  cursor: pointer;
+  position: fixed; inset: 0; z-index: 5;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  background: #000; color: #fff;
 }
-#title {
-  font-size: 30px;
-  letter-spacing: .42em;
-  margin-left: .42em;
-}
-#subtitle {
-  font-size: 10px;
-  letter-spacing: .28em;
-  margin-top: 15px;
-  color: #bbb;
-}
-#instruction {
-  font-size: 10px;
-  letter-spacing: .2em;
-  margin-top: 46px;
-  color: #aaa;
-}
+#title { font-size: 28px; letter-spacing: .45em; margin-left: .45em; }
+#subtitle { margin-top: 14px; font-size: 10px; letter-spacing: .25em; color: #888; }
+#instruction { margin-top: 48px; font-size: 9px; letter-spacing: .2em; color: #777; }
 #start.hidden { display: none; }
 #caption {
-  position: fixed;
-  left: 20px;
-  bottom: 20px;
-  z-index: 3;
-  color: rgba(255,255,255,.55);
-  font-size: 9px;
-  letter-spacing: .22em;
+  position: fixed; left: 18px; bottom: 18px;
+  color: #777; font-size: 9px; letter-spacing: .2em;
   pointer-events: none;
 }
 </style>
@@ -73,39 +41,25 @@ canvas {
 
 <div id="caption">A FIELD OF SILENCE</div>
 
-<audio id="ambient"
-  src="VOID_Deep_Ambient_001.mp3"
-  loop preload="auto"></audio>
+<audio id="ambient" src="VOID_Deep_Ambient_001.mp3"
+       loop preload="auto"></audio>
 
 <script>
-let bg;
-let particles = [];
-let analyser, frequencyData;
+let analyser, freq;
 let audioContext;
 let started = false;
-let energy = 0;
-let bass = 0;
-let treble = 0;
-let pointerX = 0;
-let pointerY = 0;
-let disturbance = 0;
+let energy = 0, bass = 0, treble = 0;
+let touchPower = 0;
+let touchX = 0, touchY = 0;
 
-const COUNT = 420;
-
-function preload() {
-  bg = loadImage("void_background.png");
-}
+const CURVES = 7;
+const DOTS = 25;
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
-
-  pointerX = width / 2;
-  pointerY = height / 2;
-
-  for (let i = 0; i < COUNT; i++) {
-    particles.push(new Particle());
-  }
+  touchX = width / 2;
+  touchY = height / 2;
 
   document.getElementById("start")
     .addEventListener("click", startAudio);
@@ -114,207 +68,171 @@ function setup() {
 async function startAudio() {
   if (started) return;
 
-  const instruction = document.getElementById("instruction");
-  instruction.textContent = "ENTERING THE VOID...";
-
   try {
-    const audio = document.getElementById("ambient");
-
-    audioContext = new (
-      window.AudioContext || window.webkitAudioContext
-    )();
-
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
     await audioContext.resume();
 
+    const audio = document.getElementById("ambient");
     const source = audioContext.createMediaElementSource(audio);
 
     const filter = audioContext.createBiquadFilter();
     filter.type = "lowpass";
     filter.frequency.value = 7000;
 
-    const analyserNode = audioContext.createAnalyser();
-    analyserNode.fftSize = 1024;
-    analyserNode.smoothingTimeConstant = 0.88;
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.88;
+    freq = new Uint8Array(analyser.frequencyBinCount);
 
-    const output = audioContext.createGain();
-    output.gain.value = 0.85;
+    const volume = audioContext.createGain();
+    volume.gain.value = 0.85;
 
     source.connect(filter);
-    filter.connect(analyserNode);
-    analyserNode.connect(output);
-    output.connect(audioContext.destination);
-
-    analyser = analyserNode;
-    frequencyData = new Uint8Array(analyser.frequencyBinCount);
+    filter.connect(analyser);
+    analyser.connect(volume);
+    volume.connect(audioContext.destination);
 
     await audio.play();
-
     started = true;
     document.getElementById("start").classList.add("hidden");
-
   } catch (e) {
-    instruction.textContent =
+    document.getElementById("instruction").textContent =
       "CHECK AUDIO FILE AND TRY AGAIN";
     console.error(e);
   }
 }
 
 function draw() {
-  // Crop the background image to fill the entire screen.
-  clear();
+  background(0);
 
-  if (bg) {
-    const scale = max(width / bg.width, height / bg.height);
-    const w = bg.width * scale;
-    const h = bg.height * scale;
+  if (analyser) {
+    analyser.getByteFrequencyData(freq);
+    let sum = 0, low = 0, high = 0;
 
-    image(bg, (width - w) / 2, (height - h) / 2, w, h);
-  }
-
-  // Darken the image slightly to make particles visible.
-  noStroke();
-  fill(0, 0, 0, 28);
-  rect(0, 0, width, height);
-
-  if (analyser && frequencyData) {
-    analyser.getByteFrequencyData(frequencyData);
-
-    let all = 0;
-    let low = 0;
-    let high = 0;
-
-    for (let i = 0; i < frequencyData.length; i++) {
-      all += frequencyData[i];
-      if (i < 14) low += frequencyData[i];
-      if (i > 70) high += frequencyData[i];
+    for (let i = 0; i < freq.length; i++) {
+      sum += freq[i];
+      if (i < 14) low += freq[i];
+      if (i > 70) high += freq[i];
     }
 
-    energy = lerp(
-      energy, all / frequencyData.length / 255, 0.1
-    );
-    bass = lerp(bass, low / 14 / 255, 0.08);
+    energy = lerp(energy, sum / freq.length / 255, 0.08);
+    bass = lerp(bass, low / 14 / 255, 0.07);
     treble = lerp(
       treble,
-      high / max(1, frequencyData.length - 70) / 255,
-      0.08
+      high / max(1, freq.length - 70) / 255,
+      0.07
     );
   }
 
-  disturbance *= 0.96;
+  touchPower *= 0.96;
 
-  // Particles respond to the ambient audio.
-  for (let p of particles) {
-    p.update();
-    p.show();
-  }
-}
+  const cx = width * 0.5;
+  const cy = height * 0.5;
+  const unit = min(width, height);
+  const base = unit * 0.235;
 
-class Particle {
-  constructor() {
-    this.reset(true);
-  }
+  // Very fine central axes
+  stroke(170, 170, 170, 85);
+  strokeWeight(0.65);
+  line(cx - unit * 0.44, cy, cx + unit * 0.44, cy);
+  line(cx, cy - unit * 0.40, cx, cy + unit * 0.40);
 
-  reset(initial = false) {
-    const a = random(TWO_PI);
-    const r = random(
-      min(width, height) * 0.08,
-      min(width, height) * 0.62
-    );
+  // Dots along the horizontal and vertical axes
+  noStroke();
+  for (let i = 0; i < DOTS; i++) {
+    const u = map(i, 0, DOTS - 1, -0.43, 0.43);
+    const pulse = 0.5 + 0.5 * sin(frameCount * 0.018 + i * 0.7);
+    const size = (i % 6 === 0 ? 3.2 : 1.4) + pulse * energy * 2;
 
-    this.x = width / 2 + cos(a) * r;
-    this.y = height / 2 + sin(a) * r;
-
-    this.vx = random(-0.12, 0.12);
-    this.vy = random(-0.12, 0.12);
-    this.phase = random(TWO_PI);
-    this.size = random(0.6, 2.0);
+    fill(235, 235, 235, 100 + pulse * 120);
+    circle(cx + u * unit, cy, size);
+    circle(cx, cy + u * unit, size);
   }
 
-  update() {
-    const cx = width / 2;
-    const cy = height / 2;
+  // Seven flat, overlapping wave contours
+  for (let k = 0; k < CURVES; k++) {
+    const phase = frameCount * 0.008 + k * 0.62;
+    const spread = 0.60 + k * 0.105;
+    const amplitude = base * (0.48 + k * 0.065);
 
-    const dx = this.x - cx;
-    const dy = this.y - cy;
-    const angle = atan2(dy, dx);
+    noFill();
+    stroke(230, 230, 235, 105 - k * 10 + energy * 50);
+    strokeWeight(k === 0 ? 1.05 : 0.65);
 
-    const swirl = 0.012 + bass * 0.055;
-    this.vx += -sin(angle) * swirl;
-    this.vy += cos(angle) * swirl;
+    beginShape();
+    const steps = 180;
 
-    // Gentle inward drift.
-    this.vx -= dx * 0.00025;
-    this.vy -= dy * 0.00025;
+    for (let j = 0; j <= steps; j++) {
+      const a = TWO_PI * j / steps;
 
-    // A delicate vibration from higher frequencies.
-    this.vx += sin(frameCount * 0.012 + this.phase)
-      * treble * 0.07;
-    this.vy += cos(frameCount * 0.014 + this.phase)
-      * treble * 0.07;
+      const wave1 = sin(a * 2 + phase) * amplitude * 0.30;
+      const wave2 = sin(a * 3 - phase * 0.7) * amplitude * 0.12;
+      const audioShape = bass * amplitude * 0.45 *
+                         sin(a * 2 + phase * 1.4);
 
-    // Finger or mouse movement creates a soft disturbance.
-    const px = this.x - pointerX;
-    const py = this.y - pointerY;
-    const d = sqrt(px * px + py * py);
-    const radius = min(width, height) * 0.25;
+      const r = base * spread + wave1 + wave2 + audioShape;
+      const x = cx + cos(a) * r * (1.0 + 0.18 * cos(a * 2 + phase));
+      const y = cy + sin(a) * r * (1.12 + 0.12 * sin(a * 3 - phase));
 
-    if (disturbance > 0.01 && d < radius) {
-      const force = disturbance * (1 - d / radius);
-      this.vx += px / max(1, d) * force * 0.45;
-      this.vy += py / max(1, d) * force * 0.45;
+      vertex(x, y);
     }
-
-    this.vx *= 0.989;
-    this.vy *= 0.989;
-
-    this.x += this.vx;
-    this.y += this.vy;
-
-    if (
-      this.x < -20 || this.x > width + 20 ||
-      this.y < -20 || this.y > height + 20
-    ) {
-      this.reset();
-    }
+    endShape(CLOSE);
   }
 
-  show() {
-    const pulse =
-      0.5 + 0.5 * sin(frameCount * 0.018 + this.phase);
+  // Tiny points distributed around the contours
+  for (let i = 0; i < 110; i++) {
+    const a = i * 2.39996 + frameCount * 0.0015;
+    const ring = base * (0.72 + (i % 13) * 0.052);
+    const wobble = sin(frameCount * 0.012 + i) *
+                   (1 + treble * 12);
 
-    const alpha = constrain(
-      25 + pulse * 75 + energy * 150 + bass * 40,
-      15, 180
-    );
+    const x = cx + cos(a) * (ring + wobble);
+    const y = cy + sin(a) * (ring * 1.10 + wobble);
 
+    const s = i % 17 === 0 ? 2.4 : 1.0;
     noStroke();
-    fill(235, 238, 245, alpha);
-    circle(this.x, this.y, this.size + energy * 2);
+    fill(235, 235, 240, 65 + energy * 150);
+    circle(x, y, s);
+  }
+
+  // Central white disk
+  noStroke();
+  fill(248, 248, 248);
+  circle(cx, cy, unit * (0.037 + bass * 0.012));
+
+  // A touch gently disturbs the geometry
+  if (touchPower > 0.01) {
+    noFill();
+    stroke(220, 220, 220, touchPower * 100);
+    strokeWeight(0.7);
+    circle(
+      touchX, touchY,
+      unit * 0.05 + (1 - touchPower) * unit * 0.2
+    );
   }
 }
 
-function movePointer(x, y) {
-  pointerX = x;
-  pointerY = y;
-  disturbance = 1;
+function disturb(x, y) {
+  touchX = x;
+  touchY = y;
+  touchPower = 1;
+}
+
+function mousePressed() {
+  disturb(mouseX, mouseY);
 }
 
 function mouseMoved() {
-  movePointer(mouseX, mouseY);
-}
-
-function mouseDragged() {
-  movePointer(mouseX, mouseY);
-  return false;
+  disturb(mouseX, mouseY);
 }
 
 function touchStarted() {
-  movePointer(mouseX, mouseY);
+  disturb(mouseX, mouseY);
   return false;
 }
 
 function touchMoved() {
-  movePointer(mouseX, mouseY);
+  disturb(mouseX, mouseY);
   return false;
 }
 
